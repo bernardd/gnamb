@@ -80,6 +80,81 @@
 		slot
 	}).
 
+%F
+-record(
+	spawn_mob, {
+		entity_id,
+		type,
+		x, y, z,
+		pitch,
+		head_pitch,
+		yaw,
+		velocity_x,
+		velocity_y,
+		velocity_z,
+		metadata
+	}).
+
+%1C
+-record(
+	entity_metadata, {
+		entity_id,
+		metadata
+	}).
+
+%20
+-record(
+	entity_properties, {
+		entity_id,
+		properties
+	}).
+-record(
+	property, {
+		key,
+		value,
+		mods
+	}).
+-record(
+	modifier, {
+		uuid,
+		amount,
+		operation
+	}).
+
+%26
+-record(
+	map_chunk_bulk, {
+		chunks,
+		sky_light_sent,
+		data,
+		x, z,
+		primary_bitmap,
+		add_bitmap
+	}).
+
+%2B
+-record(
+	change_game_state, {
+		reason,
+		value
+	}).
+
+%2F
+-record(
+	set_slot, {
+		window_id,
+		slot,
+		data
+	}).
+
+%30
+-record(
+	window_items, {
+		window_id,
+		count,
+		data
+	}).
+
 %37
 -record(
 	statistics, {

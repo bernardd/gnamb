@@ -176,6 +176,74 @@ decode(<<16#9, Slot>>) ->
 		slot = Slot
 	};
 
+% Spawn Mob
+decode(<<16#F, Data/binary>>) ->
+	{EntityID, Rest} = vi(Data),
+	<<Type, X:32, Y:32, Z:32, Pitch, HeadPitch, Yaw,
+		VelocityX:16, VelocityY:16, VelocityZ:16, MetaData/binary>> = Rest,
+	#spawn_mob{
+		entity_id = EntityID,
+		type = Type,
+		x = X, y = Y, z = Z,
+		pitch = Pitch,
+		head_pitch = HeadPitch,
+		yaw = Yaw,
+		velocity_x = VelocityX,
+		velocity_y = VelocityY,
+		velocity_z = VelocityZ,
+		metadata = MetaData % TODO
+	};
+
+% Entity Metadata
+decode(<<16#1C, EntityID:32, MetaData/binary>>) ->
+	#entity_metadata{
+		entity_id = EntityID,
+		metadata = MetaData % TODO
+	};
+
+% Entity Properties
+decode(<<16#20, EntityID:32, _Count:32, Properties/binary>>) ->
+	#entity_properties{
+		entity_id = EntityID,
+		properties = read_properties(Properties, [])
+	};
+
+% Map Chunk Bulk
+decode(<<16#26, ChunkColumnCount:16, Length:32, LightSent, Data:Length/binary,
+			ChunkX:32/signed, ChunkZ:32/signed, PrimaryBitmap:16, AddBitmap:16>>) ->
+	#map_chunk_bulk{
+		chunks = ChunkColumnCount,
+		sky_light_sent = LightSent,
+		data = Data,
+		x = ChunkX,
+		z = ChunkZ,
+		primary_bitmap = PrimaryBitmap,
+		add_bitmap = AddBitmap
+	};
+
+% Change Game State
+decode(<<16#2B, Reason, Value:32/float>>) ->
+	#change_game_state{
+		reason = Reason,
+		value = Value
+	};
+
+% Set Slot
+decode(<<16#2F, WindowID, Slot:16, Data/binary>>) ->
+	#set_slot{
+		window_id = WindowID,
+		slot = Slot,
+		data = Data
+	};
+
+% Window Items
+decode(<<16#30, WindowID, Count:16, Data/binary>>) ->
+	#window_items{
+		window_id = WindowID,
+		count = Count,
+		data = Data % TODO
+	};
+
 % Statistics
 decode(<<16#37, Data/binary>>) ->
 	{_Count, Rest1} = vi(Data),
@@ -223,3 +291,14 @@ read_stats(<<Data/binary>>, Acc) ->
 	{Name, Rest} = s(Data),
 	{Value, Remainder} = vi(Rest),
 	read_stats(Remainder, [{Name, Value} | Acc]).
+
+read_properties(<<>>, Acc) -> lists:reverse(Acc);
+read_properties(<<Data/binary>>, Acc) ->
+	{Key, Rest1} = s(Data),
+	<<Value/float, Length:16, Rest2/binary>> = Rest1,
+	{Mods, Remainder} = read_modifiers(Length, Rest2, []),
+	read_properties(Remainder, [#property{key = Key, value = Value, mods = Mods} | Acc]).
+
+read_modifiers(0, Bin, Acc) -> {Acc, Bin};
+read_modifiers(N, <<UUID:128, Amount/float, Operation, Rest/binary>>, Acc) ->
+	read_modifiers(N-1, Rest, [#modifier{uuid = UUID, amount = Amount, operation = Operation} | Acc]).
