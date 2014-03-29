@@ -4,19 +4,17 @@
 
 -compile(export_all).
 
--define(KEEPALIVE, 16#00).
--define(LOGIN, 16#01).
--define(HANDSHAKE, 16#02).
--define(TIME_UPDATE, 16#04).
--define(KICK, 16#FF).
+-define(VI(X), (vi(X))/binary).
+-define(S(X), (s(X))/binary).
 
 packet(B) -> <<(vi(byte_size(B)))/binary, B/binary>>.
 
 get_packet(B) ->
 	{Size, Rest} = vi(B),
+	io:fwrite("Size: ~p, byte_size(Rest) = ~p\n", [Size, byte_size(Rest)]),
 	if
-		byte_size(Rest) => Size ->
-			<<Packet:Size/binary, Remainder>> = Rest,
+		byte_size(Rest) >= Size ->
+			<<Packet:Size/binary, Remainder/binary>> = Rest,
 			{Packet, Remainder};
 		true ->
 			incomplete
@@ -59,26 +57,39 @@ s(B) when is_binary(B) ->
 
 %%%%% Minecraft packets - to server %%%%%
 handshake() ->
-	packet(<<0:8, (vi(4))/binary, (s("localhost"))/binary, 25565:16, (vi(2))/binary>>).
+	packet(<<0:8, ?VI(4), ?S("localhost"), 25565:16, ?VI(2)>>).
 
 login_start(Name) ->
 	packet(<<0:8, (s(Name))/binary>>).
 
 encryption_response(SharedSecret, VerifyToken) ->
-	packet(<<1:8, (byte_size(SharedSecret)):16, SharedSecret/binary, (byte_size(VerifyToken)):16, VerifyToken/binary>>.
+	packet(<<1:8, (byte_size(SharedSecret)):16, SharedSecret/binary,
+				(byte_size(VerifyToken)):16, VerifyToken/binary>>).
+
+keep_alive(ID) ->
+	packet(<<0:8, ID:32>>).
 
 %%%%% Minecraft packets - from server %%%%%
+
+%%% Login state:
+
+% Disconnect
+decode_login(<<0:8, Data/binary>>) ->
+	{Reason, <<>>} = s(Data),
+	#disconnect{reason = Reason};
+
 % Encryption Request
-decode(<<1:8, Data/binary>>) ->
+decode_login(<<1:8, Data/binary>>) ->
 	{Server, Rest} = s(Data),
 	<<KeyLength:16, PublicKey:KeyLength/binary, TokenLength:16, Token:TokenLength/binary>> = Rest,
-	#encrption_request{
+	#encryption_request{
 		server_id = Server,
 		public_key = PublicKey,
 		verify_token = Token
 	};
 
-decode(<<2:8, Data/binary>>) ->
+% Login Success
+decode_login(<<2:8, Data/binary>>) ->
 	{UUID, Rest} = s(Data),
 	{Username, <<>>} = s(Rest),
 	#login_success{
@@ -86,5 +97,52 @@ decode(<<2:8, Data/binary>>) ->
 		username = Username
 	};
 
-decode(_) ->
+decode_login(<<X:8, _Data/binary>>) ->
+	io:fwrite("Unhandled packet type for login state: 0x~.16B\n", [X]),
+	unhandled.
+
+% Keep Alive
+decode(<<0:8, ID:32>>) ->
+	#keep_alive{id=ID};
+
+% Join Game
+decode(<<1:8, EntityID:32, GameMode:8/unsigned, Dimension:8, Difficulty:8/unsigned,
+			MaxPlayers:8/unsigned, Rest/binary>>) ->
+	{LevelType, <<>>} = s(Rest),
+	#join_game{
+		entity_id = EntityID,
+		game_mode = GameMode,
+		dimension = Dimension,
+		difficult = Difficulty,
+		max_players = MaxPlayers,
+		level_type = LevelType
+	};
+
+% Chat Message
+decode(<<2:8, Data/binary>>) ->
+	{Message, <<>>} = s(Data),
+	#chat_message{
+		message = Message
+	};
+
+% Time Update
+decode(<<3:8, WorldAge:64, TimeOfDay:64>>) ->
+	#time_update{
+		world_age = WorldAge,
+		time_of_day = TimeOfDay
+	};
+
+% Entity Equipment
+decode(<<4:8, EntityID:32, Slot:16, _Rest/binary>>) ->
+	#entity_equipment{
+		entity_id = EntityID,
+		slot = Slot,
+		item = undefined % TODO
+	};
+
+decode(<<5:8, X:32, Y:32, Z:32>>) ->
+	#spawn_pos{x=X, y=Y, z=Z};
+
+decode(<<X:8, _Data/binary>>) ->
+	io:fwrite("Unhandled packet type: 0x~.16B\n", [X]),
 	unhandled.
