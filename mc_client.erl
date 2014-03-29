@@ -29,27 +29,31 @@ start_link(Server) ->
 loop(State = #state{socket = Socket}, DataSoFar) ->
 	inet:setopts(Socket, [{active, once}]),
 	receive
-		{tcp, Socket, RawData} ->
-%			io:fwrite("Got data (encrypted): ~p\n", [RawData]),
+		{tcp, Socket, Data} ->
 			DecryptedData = case get(key) of
 				undefined ->
-					RawData;
+					Data;
 				Key ->
-					crypto:block_decrypt(?CYPHER, Key, Key, RawData)
+					crypto:block_decrypt(?CYPHER, Key, Key, Data)
 			end,
-			io:fwrite("Got data (unencrypted): ~p\n", [DecryptedData]),
+%			io:fwrite("Got data (unencrypted): ~p\n", [DecryptedData]),
 			FullData = <<DataSoFar/binary, DecryptedData/binary>>,
-			case mc_prot:get_packet(FullData) of
-				incomplete ->
-					loop(State, FullData);
-				{Packet, Remainder} ->
-					NewState = handle_packet(Packet, State),
-					loop(NewState, Remainder)
-			end;
+%			io:fwrite("Got data (encrypted): ~p\n", [RawData]),
+			handle_data(State, FullData);
 		{tcp_closed, Socket} ->
 			io:fwrite("Socket closed.\n", []);
 		{tcp_error, Socket, Reason} ->
 			io:fwrite("Socket error: ~p\n", [Reason])
+	end.
+
+handle_data(State, <<>>) -> loop(State, <<>>);
+handle_data(State, Data) ->
+	case mc_prot:get_packet(Data) of
+		incomplete ->
+			loop(State, Data);
+		{Packet, Remainder} ->
+			NewState = handle_packet(Packet, State),
+			handle_data(NewState, Remainder)
 	end.
 
 handle_packet(Packet, State) ->
@@ -92,6 +96,12 @@ handle_packet(Packet, State) ->
 			State;
 		#entity_equipment{} ->
 			% Nothing
+			State;
+		#player_abilities{} ->
+			% TODO
+			State;
+		#plugin_message{} ->
+			% Nothing?
 			State;
 		#spawn_pos{x=X, y=Y, z=Z} ->
 			State#state{pos = {X, Y, Z}};

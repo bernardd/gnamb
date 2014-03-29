@@ -26,13 +26,11 @@ vi(X) when is_integer(X) ->
 vi(X) when is_binary(X) ->
 	decode_vi(X, <<>>).
 
-encode_vi(0, <<>>) -> <<0:8>>;
+encode_vi(0, <<>>) -> <<0>>;
 encode_vi(0, Acc) -> Acc;
-encode_vi(-1, <<>>) -> <<-1:8>>;
-encode_vi(-1, Acc) -> Acc;
 encode_vi(X, Acc) ->
 	Leader = if
-		X > 127 orelse X < -128 -> 1;
+		X > 127 -> 1;
 		true -> 0
 	end,
 	encode_vi(X bsr 7, <<Acc/bitstring, Leader:1, (X band 127):7>>).
@@ -40,10 +38,33 @@ encode_vi(X, Acc) ->
 decode_vi(<<0:1, N:7/bitstring, Rest/binary>>, Acc) ->
 	Final = <<N/bitstring, Acc/bitstring>>,
 	Size = bit_size(Final),
-	<<X:Size/signed>> = Final,
+	<<X:Size/unsigned>> = Final,
 	{X, Rest};
 decode_vi(<<1:1, N:7/bitstring, Rest/binary>>, Acc) ->
 	decode_vi(Rest, <<N/bitstring, Acc/bitstring>>).
+
+
+% Well this was all very clever when I needed signed varints...which it turns out
+% is never:
+%
+%encode_vi(0, <<>>) -> <<0>>;
+%encode_vi(0, Acc) -> Acc;
+%encode_vi(-1, <<>>) -> <<-1>>;
+%encode_vi(-1, Acc) -> Acc;
+%encode_vi(X, Acc) ->
+%	Leader = if
+%		X > 127 orelse X < -128 -> 1;
+%		true -> 0
+%	end,
+%	encode_vi(X bsr 7, <<Acc/bitstring, Leader:1, (X band 127):7>>).
+%
+%decode_vi(<<0:1, N:7/bitstring, Rest/binary>>, Acc) ->
+%	Final = <<N/bitstring, Acc/bitstring>>,
+%	Size = bit_size(Final),
+%	<<X:Size/signed>> = Final,
+%	{X, Rest};
+%decode_vi(<<1:1, N:7/bitstring, Rest/binary>>, Acc) ->
+%	decode_vi(Rest, <<N/bitstring, Acc/bitstring>>).
 
 %%%%% String handling %%%%%
 s(S) when is_list(S) ->
@@ -57,29 +78,29 @@ s(B) when is_binary(B) ->
 
 %%%%% Minecraft packets - to server %%%%%
 handshake() ->
-	packet(<<0:8, ?VI(4), ?S("localhost"), 25565:16, ?VI(2)>>).
+	packet(<<16#0, ?VI(4), ?S("localhost"), 25565:16, ?VI(2)>>).
 
 login_start(Name) ->
-	packet(<<0:8, (s(Name))/binary>>).
+	packet(<<16#0, (s(Name))/binary>>).
 
 encryption_response(SharedSecret, VerifyToken) ->
-	packet(<<1:8, (byte_size(SharedSecret)):16, SharedSecret/binary,
+	packet(<<16#1, (byte_size(SharedSecret)):16, SharedSecret/binary,
 				(byte_size(VerifyToken)):16, VerifyToken/binary>>).
 
 keep_alive(ID) ->
-	packet(<<0:8, ID:32>>).
+	packet(<<16#0, ID:32>>).
 
 %%%%% Minecraft packets - from server %%%%%
 
 %%% Login state:
 
 % Disconnect
-decode_login(<<0:8, Data/binary>>) ->
+decode_login(<<16#0, Data/binary>>) ->
 	{Reason, <<>>} = s(Data),
 	#disconnect{reason = Reason};
 
 % Encryption Request
-decode_login(<<1:8, Data/binary>>) ->
+decode_login(<<16#1, Data/binary>>) ->
 	{Server, Rest} = s(Data),
 	<<KeyLength:16, PublicKey:KeyLength/binary, TokenLength:16, Token:TokenLength/binary>> = Rest,
 	#encryption_request{
@@ -89,7 +110,7 @@ decode_login(<<1:8, Data/binary>>) ->
 	};
 
 % Login Success
-decode_login(<<2:8, Data/binary>>) ->
+decode_login(<<16#2, Data/binary>>) ->
 	{UUID, Rest} = s(Data),
 	{Username, <<>>} = s(Rest),
 	#login_success{
@@ -97,17 +118,17 @@ decode_login(<<2:8, Data/binary>>) ->
 		username = Username
 	};
 
-decode_login(<<X:8, _Data/binary>>) ->
+decode_login(<<X, _Data/binary>>) ->
 	io:fwrite("Unhandled packet type for login state: 0x~.16B\n", [X]),
 	unhandled.
 
 % Keep Alive
-decode(<<0:8, ID:32>>) ->
+decode(<<16#0, ID:32>>) ->
 	#keep_alive{id=ID};
 
 % Join Game
-decode(<<1:8, EntityID:32, GameMode:8/unsigned, Dimension:8, Difficulty:8/unsigned,
-			MaxPlayers:8/unsigned, Rest/binary>>) ->
+decode(<<16#1, EntityID:32, GameMode/unsigned, Dimension, Difficulty/unsigned,
+			MaxPlayers/unsigned, Rest/binary>>) ->
 	{LevelType, <<>>} = s(Rest),
 	#join_game{
 		entity_id = EntityID,
@@ -119,30 +140,86 @@ decode(<<1:8, EntityID:32, GameMode:8/unsigned, Dimension:8, Difficulty:8/unsign
 	};
 
 % Chat Message
-decode(<<2:8, Data/binary>>) ->
+decode(<<16#2, Data/binary>>) ->
 	{Message, <<>>} = s(Data),
 	#chat_message{
 		message = Message
 	};
 
 % Time Update
-decode(<<3:8, WorldAge:64, TimeOfDay:64>>) ->
+decode(<<16#3, WorldAge:64, TimeOfDay:64>>) ->
 	#time_update{
 		world_age = WorldAge,
 		time_of_day = TimeOfDay
 	};
 
 % Entity Equipment
-decode(<<4:8, EntityID:32, Slot:16, _Rest/binary>>) ->
+decode(<<16#4, EntityID:32, Slot:16, _Rest/binary>>) ->
 	#entity_equipment{
 		entity_id = EntityID,
 		slot = Slot,
 		item = undefined % TODO
 	};
 
-decode(<<5:8, X:32, Y:32, Z:32>>) ->
+% Player Position and Look
+decode(<<16#8, X/float, Y/float, Z/float, Yaw:32/float, Pitch:32/float, OnGround>>) ->
+	#player_position_and_look{
+		x=X, y=Y, z=Z,
+		yaw = Yaw,
+		pitch = Pitch,
+		on_ground = OnGround
+	};
+
+% Held Item Change
+decode(<<16#9, Slot>>) ->
+	#held_item_change{
+		slot = Slot
+	};
+
+% Statistics
+decode(<<16#37, Data/binary>>) ->
+	{_Count, Rest1} = vi(Data),
+	Stats = read_stats(Rest1, []),
+	#statistics{statistics = Stats};
+
+% Player List Item
+decode(<<16#38, Data/binary>>) ->
+	{Name, Rest} = s(Data),
+	<<Online, Ping:16>> = Rest,
+	#player_list_item{
+		name = Name,
+		online = Online,
+		ping = Ping
+	};
+
+% Player Abilities
+decode(<<16#39, Flags, FlyingSpeed:32/float, WalkingSpeed:32/float>>) ->
+	#player_abilities{
+		flags = Flags,
+		flying_speed = FlyingSpeed,
+		walking_speed = WalkingSpeed
+	};
+
+% Plugin Message
+decode(<<16#3F, Rest/binary>>) ->
+	{Channel, Rest1} = s(Rest),
+	<<Length:16, Data:Length/binary>> = Rest1,
+	#plugin_message{
+		channel = Channel,
+		data = Data
+	};
+
+decode(<<5, X:32, Y:32, Z:32>>) ->
 	#spawn_pos{x=X, y=Y, z=Z};
 
-decode(<<X:8, _Data/binary>>) ->
-	io:fwrite("Unhandled packet type: 0x~.16B\n", [X]),
+decode(<<X, _Data/binary>>) ->
+	io:fwrite("**** Unhandled packet type: 0x~.16B\n", [X]),
 	unhandled.
+
+
+% Helper functions
+read_stats(<<>>, Acc) -> lists:reverse(Acc);
+read_stats(<<Data/binary>>, Acc) ->
+	{Name, Rest} = s(Data),
+	{Value, Remainder} = vi(Rest),
+	read_stats(Remainder, [{Name, Value} | Acc]).
