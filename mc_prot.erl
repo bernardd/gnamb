@@ -11,7 +11,7 @@ packet(B) -> <<(vi(byte_size(B)))/binary, B/binary>>.
 
 get_packet(B) ->
 	{Size, Rest} = vi(B),
-	io:fwrite("Size: ~p, byte_size(Rest) = ~p\n", [Size, byte_size(Rest)]),
+%	io:fwrite("Size: ~p, byte_size(Rest) = ~p\n", [Size, byte_size(Rest)]),
 	if
 		byte_size(Rest) >= Size ->
 			<<Packet:Size/binary, Remainder/binary>> = Rest,
@@ -194,6 +194,22 @@ decode(<<16#F, Data/binary>>) ->
 		metadata = MetaData % TODO
 	};
 
+% Entity Look and Relative Move
+decode(<<16#17, EntityID:32, DX, DY, DZ, Yaw, Pitch>>) ->
+	#entity_look_and_relative_move{
+		entity_id = EntityID,
+		dx = DX, dy = DY, dz = DZ,
+		yaw = Yaw,
+		pitch = Pitch
+	};
+
+% Entity Head Look
+decode(<<16#19, EntityID:32, Yaw>>) ->
+	#entity_head_look{
+		entity_id = EntityID,
+		yaw = Yaw
+	};
+
 % Entity Metadata
 decode(<<16#1C, EntityID:32, MetaData/binary>>) ->
 	#entity_metadata{
@@ -209,17 +225,12 @@ decode(<<16#20, EntityID:32, _Count:32, Properties/binary>>) ->
 	};
 
 % Map Chunk Bulk
-decode(<<16#26, ChunkColumnCount:16, Length:32, LightSent, Data:Length/binary,
-			ChunkX:32/signed, ChunkZ:32/signed, PrimaryBitmap:16, AddBitmap:16>>) ->
-	#map_chunk_bulk{
-		chunks = ChunkColumnCount,
-		sky_light_sent = LightSent,
-		data = Data,
-		x = ChunkX,
-		z = ChunkZ,
-		primary_bitmap = PrimaryBitmap,
-		add_bitmap = AddBitmap
-	};
+decode(<<16#26, _ChunkColumnCount:16, Length:32, LightSent, Data:Length/binary, MetaData/binary>>) ->
+	Data = zlib:uncompress(Data),
+	ColumnMetaData = read_chunk_metadata(MetaData, []),
+
+%	#map_chunk_bulk{
+%	};
 
 % Change Game State
 decode(<<16#2B, Reason, Value:32/float>>) ->
@@ -302,3 +313,13 @@ read_properties(<<Data/binary>>, Acc) ->
 read_modifiers(0, Bin, Acc) -> {Acc, Bin};
 read_modifiers(N, <<UUID:128, Amount/float, Operation, Rest/binary>>, Acc) ->
 	read_modifiers(N-1, Rest, [#modifier{uuid = UUID, amount = Amount, operation = Operation} | Acc]).
+
+read_chunk_metadata(<<>>, Acc) -> lists:reverse(Acc);
+read_chunk_metadata(<<ChunkX:32/signed, ChunkZ:32/signed, PrimaryBitmap:16, AddBitmap:16,
+							 Rest/binary>>, Acc) ->
+	read_chunk_metadata(Rest, [#chunk_metadata{
+		x = ChunkX,
+		z = ChunkZ,
+		primary_bitmap = PrimaryBitmap,
+		add_bitmap = AddBitmap}
+	 | Acc]).

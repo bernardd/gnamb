@@ -95,6 +95,22 @@
 		metadata
 	}).
 
+%17
+-record(
+	entity_look_and_relative_move, {
+		entity_id,
+		dx, dy, dz,
+		yaw,
+		pitch
+	}).
+
+%19
+-record(
+	entity_head_look, {
+		entity_id,
+		yaw
+	}).
+
 %1C
 -record(
 	entity_metadata, {
@@ -127,6 +143,10 @@
 		chunks,
 		sky_light_sent,
 		data,
+		chunk_metadata
+	}).
+-record(
+	chunk_metadata, {
 		x, z,
 		primary_bitmap,
 		add_bitmap
@@ -183,3 +203,10 @@
 		channel,
 		data
 	}).
+
+
+
+% Map chunk
+-record(
+	chunk, {
+		pos % {x, z}

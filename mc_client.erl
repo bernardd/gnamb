@@ -17,8 +17,6 @@
 	}).
 
 start_link(Server) ->
-	crypto:start(),
-	application:start(asn1),
 	put(key, undefined),
 	{ok, Socket} = gen_tcp:connect(Server, ?MC_PORT, [binary, {active, false}]),
 	put(socket, Socket),
